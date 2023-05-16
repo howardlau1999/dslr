@@ -1,8 +1,10 @@
 #ifndef _DSLR_H_
 #define _DSLR_H_
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <unordered_map>
 
 #include "rdmapp/qp.h"
@@ -10,6 +12,26 @@
 #include <rdmapp/mr.h>
 
 namespace dslr {
+
+using namespace std::chrono_literals;
+
+auto const kLeaseTime = 10ms;
+auto const kWaitTime = 5us;
+
+inline auto randomBackoffDuration() {
+  static std::random_device rd;
+  static std::mt19937 gen(rd());
+  static std::uniform_int_distribution<> dis(0, 10);
+  return std::chrono::milliseconds(dis(gen));
+}
+
+inline void randomBackoff() {
+  auto start = std::chrono::steady_clock::now();
+  auto delay = randomBackoffDuration();
+  while (std::chrono::steady_clock::now() - start < delay) {
+    asm volatile("pause" ::: "memory");
+  }
+}
 
 struct lock_state {
   uint64_t state_ = 0;
@@ -54,7 +76,7 @@ public:
     if (prev.shared_max() >= kCountMax || prev.exclusive_max() >= kCountMax) {
       co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_, -1);
       // Backoff
-
+      randomBackoff();
       // HandleConflict
 
       co_return false;
@@ -78,6 +100,7 @@ public:
       co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_,
                                   0xFFFF << sizeof(uint16_t));
       // Backoff
+      randomBackoff();
 
       // HandleConflict
 
@@ -121,7 +144,7 @@ private:
       }
     }
   }
-  
+
   rdmapp::task<bool> handle_conflict(uint64_t txn_id, lock_state prev,
                                      bool exclusive) {
     while (true) {
@@ -158,7 +181,13 @@ private:
           co_return false;
         }
       }
-      // TODO: wait
+      auto sum = prev.exclusive_max() - curr.exclusive_counter() +
+                 prev.shared_max() - curr.shared_counter();
+      auto start = std::chrono::steady_clock::now();
+      auto wait_delay = sum * kWaitTime;
+      while (std::chrono::steady_clock::now() - start < wait_delay) {
+        asm volatile("pause" ::: "memory");
+      }
     }
   }
 };
