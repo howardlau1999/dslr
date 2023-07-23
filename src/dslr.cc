@@ -7,7 +7,7 @@ namespace dslr {
     if (prev.shared_max() >= kCountMax || prev.exclusive_max() >= kCountMax) {
       co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_, -1);
       // Backoff
-      randomBackoff();
+      random_backoff();
       // HandleConflict
 
       co_return false;
@@ -29,9 +29,9 @@ namespace dslr {
     auto prev = *reinterpret_cast<lock_state *>(prev_state_mr_->addr());
     if (prev.exclusive_max() >= kCountMax || prev.shared_max() >= kCountMax) {
       co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_,
-                                  0xFFFF << sizeof(uint16_t));
+                                  0xFFFFULL << (8 * sizeof(uint16_t)));
       // Backoff
-      randomBackoff();
+      random_backoff();
 
       // HandleConflict
 
@@ -51,14 +51,14 @@ namespace dslr {
 
   rdmapp::task<bool> shared_mutex::unlock_shared(uint64_t txn_id) {
     co_await qp_->fetch_and_add(remote_mr_, curr_state_mr_,
-                                1 << (2 * sizeof(uint16_t)));
+                                1ULL << (2 * sizeof(uint16_t) * 8));
 
     co_return true;
   }
 
   rdmapp::task<bool> shared_mutex::unlock(uint64_t txn_id) {
     co_await qp_->fetch_and_add(remote_mr_, curr_state_mr_,
-                                1 << (3 * sizeof(uint16_t)));
+                                1ULL << (3 * sizeof(uint16_t) * 8));
 
     co_return true;
   }

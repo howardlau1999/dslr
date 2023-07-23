@@ -25,7 +25,7 @@ inline auto randomBackoffDuration() {
   return std::chrono::milliseconds(dis(gen));
 }
 
-inline void randomBackoff() {
+inline void random_backoff() {
   auto start = std::chrono::steady_clock::now();
   auto delay = randomBackoffDuration();
   while (std::chrono::steady_clock::now() - start < delay) {
