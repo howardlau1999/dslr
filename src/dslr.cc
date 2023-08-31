@@ -25,7 +25,7 @@ namespace dslr {
 
   rdmapp::task<bool> shared_mutex::lock(uint64_t txn_id) {
     co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_,
-                                1 << sizeof(uint16_t));
+                                1 << (sizeof(uint16_t) * 8));
     auto prev = *reinterpret_cast<lock_state *>(prev_state_mr_->addr());
     if (prev.exclusive_max() >= kCountMax || prev.shared_max() >= kCountMax) {
       co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_,
