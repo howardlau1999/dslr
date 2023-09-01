@@ -16,6 +16,7 @@ namespace dslr {
 using namespace std::chrono_literals;
 
 auto const kLeaseTime = 10ms;
+auto const kDoubleLeaseTime = 2 * kLeaseTime;
 auto const kWaitTime = 5us;
 auto const kRandomBackoffBase = 10ULL;
 auto const kRandomBackoffLimit = 10000ULL;
@@ -84,9 +85,9 @@ public:
 
   rdmapp::task<bool> lock(uint64_t txn_id);
 
-  rdmapp::task<bool> unlock_shared(uint64_t txn_id);
+  rdmapp::task<bool> unlock_shared(uint64_t txn_id, std::chrono::microseconds const elapsed);
 
-  rdmapp::task<bool> unlock(uint64_t txn_id);
+  rdmapp::task<bool> unlock(uint64_t txn_id, std::chrono::microseconds const elapsed);
 
 private:
   rdmapp::task<void> reset_lock(uint64_t txn_id);
