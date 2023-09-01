@@ -1,3 +1,3 @@
-[submodule "third_party/rdmapp"]
-	path = third_party/rdmapp
-	url = https://github.com/howardlau1999/rdmapp
+[submodule "third_party/rdmapp-unsafe"]
+	path = third_party/rdmapp-unsafe
+	url = https://github.com/howardlau1999/rdmapp-unsafe

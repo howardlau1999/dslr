@@ -8,7 +8,7 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif ()
 
-add_subdirectory(third_party/rdmapp)
+add_subdirectory(third_party/rdmapp-unsafe)
 include_directories(include)
 add_library(dslr src/dslr.cc)
 target_link_libraries(dslr PUBLIC rdmapp Threads::Threads)
