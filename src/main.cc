@@ -9,8 +9,8 @@
 #include <iostream>
 #include <thread>
 
-#include <rdmapp/rdmapp.h>
 #include <rdmapp/executor.h>
+#include <rdmapp/rdmapp.h>
 
 using boost::asio::awaitable;
 using boost::asio::co_spawn;
@@ -33,6 +33,13 @@ uint64_t lock_state = 0;
 rdmapp::local_mr *server_lock_state_mr;
 
 rdmapp::task<void> rdma_server_func(rdmapp::qp *qp_ptr) {
+  auto local_mr_serialized = server_lock_state_mr->serialize();
+  auto buffer_mr = pd_ptr->reg_mr(local_mr_serialized.data(), local_mr_serialized.size());
+  co_await qp_ptr->send(&buffer_mr);
+  std::cout << "Sent mr addr=" << server_lock_state_mr->addr()
+            << " length=" << server_lock_state_mr->length()
+            << " rkey=" << server_lock_state_mr->rkey() << " to client"
+            << std::endl;
   std::vector<uint8_t> local_mr_buffer(1024);
   auto local_mr =
       pd_ptr->reg_mr(local_mr_buffer.data(), local_mr_buffer.size());
@@ -43,8 +50,12 @@ rdmapp::task<void> rdma_server_func(rdmapp::qp *qp_ptr) {
 
 rdmapp::task<void> rdma_client_func(rdmapp::qp *qp_ptr) {
   char remote_mr_serialized[rdmapp::remote_mr::kSerializedSize];
-  co_await qp_ptr->recv(remote_mr_serialized, sizeof(remote_mr_serialized));
+  auto buffer_mr = pd_ptr->reg_mr(remote_mr_serialized, sizeof(remote_mr_serialized));
+  co_await qp_ptr->recv(&buffer_mr);
   auto remote_mr = rdmapp::remote_mr::deserialize(remote_mr_serialized);
+  std::cout << "Received mr addr=" << remote_mr.addr()
+            << " length=" << remote_mr.length() << " rkey=" << remote_mr.rkey()
+            << " from server" << std::endl;
   uint64_t curr_state = 0;
   uint64_t prev_state = 0;
   auto local_curr_mr =
@@ -89,7 +100,6 @@ awaitable<rdmapp::deserialized_qp> recv_qp(tcp::socket &socket) {
                               remote_qp.header.user_data_size - user_data_read),
           use_awaitable);
     }
-    std::printf(" user_data=%s", remote_qp.user_data.data());
   }
   co_return remote_qp;
 }
@@ -121,6 +131,7 @@ awaitable<void> connector(std::string const &host, std::string const &port,
               remote_qp.header.sq_psn);
   qp_ptr->user_data() = std::move(remote_qp.user_data);
   qp_ptr->rts();
+  rdma_client_func(qp_ptr).detach();
 }
 
 awaitable<void> listener() {
@@ -187,7 +198,7 @@ int main(int argc, char *argv[]) {
     auto server_thread = std::thread(server_func);
     server_thread.join();
   } else if (argc == 3) {
-    auto client_thread = std::thread(client_func);
+    auto client_thread = std::thread(client_func, argv[1], argv[2]);
     client_thread.join();
   } else {
     std::cout << "Usage: " << argv[0] << " [port] for server and " << argv[0]
