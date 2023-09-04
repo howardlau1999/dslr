@@ -62,6 +62,12 @@ struct lock_state {
   uint16_t shared_counter() const { return (state_ >> kSharedCounterBitOffset) & 0xffff; }
   uint16_t exclusive_max() const { return (state_ >> kExclusiveMaxBitOffset) & 0xffff; }
   uint16_t shared_max() const { return state_ & 0xffff; }
+  operator std::string() const {
+    return "{" + std::to_string(exclusive_counter()) + "," +
+           std::to_string(shared_counter()) + "," +
+           std::to_string(exclusive_max()) + "," +
+           std::to_string(shared_max()) + "}";
+  }
 };
 
 class shared_mutex {

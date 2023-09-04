@@ -1,5 +1,7 @@
 #include "dslr.h"
 
+#include <boost/log/trivial.hpp>
+
 namespace dslr {
 
 rdmapp::task<bool> shared_mutex::lock_shared(uint64_t txn_id) {
@@ -7,6 +9,7 @@ rdmapp::task<bool> shared_mutex::lock_shared(uint64_t txn_id) {
   reset_from_[txn_id] = lock_state(0);
   co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_, 1ULL);
   auto prev = *reinterpret_cast<lock_state *>(prev_state_mr_->addr());
+  BOOST_LOG_TRIVIAL(info) << "prev=" << std::string(prev);
   if (prev.shared_max() >= kCountMax || prev.exclusive_max() >= kCountMax) {
     constexpr uint64_t neg = -1;
     co_await qp_->fetch_and_add(remote_mr_, prev_state_mr_, neg);
@@ -25,6 +28,7 @@ rdmapp::task<bool> shared_mutex::lock_shared(uint64_t txn_id) {
                                      prev.exclusive_max(), kCountMax);
   }
   if (prev.exclusive_counter() == prev.exclusive_max()) {
+    BOOST_LOG_TRIVIAL(info) << "lock_shared success";
     co_return true;
   } else {
     // HandleConflict
@@ -70,7 +74,8 @@ shared_mutex::unlock_shared(uint64_t txn_id,
   if (elapsed < kLeaseTime || reset_from.state_ != 0) {
     co_await qp_->fetch_and_add(remote_mr_, curr_state_mr_,
                                 1ULL << kSharedCounterBitOffset);
-
+    auto const curr = *reinterpret_cast<lock_state *>(curr_state_mr_->addr());
+    BOOST_LOG_TRIVIAL(info) << "curr=" << std::string(curr);
     if (reset_from.state_ > 0) {
       co_await reset_lock(txn_id);
     }

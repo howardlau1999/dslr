@@ -5,6 +5,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/write.hpp>
+#include <boost/log/trivial.hpp>
 #include <cstdio>
 #include <iostream>
 #include <thread>
@@ -34,28 +35,31 @@ rdmapp::local_mr *server_lock_state_mr;
 
 rdmapp::task<void> rdma_server_func(rdmapp::qp *qp_ptr) {
   auto local_mr_serialized = server_lock_state_mr->serialize();
-  auto buffer_mr = pd_ptr->reg_mr(local_mr_serialized.data(), local_mr_serialized.size());
+  auto buffer_mr =
+      pd_ptr->reg_mr(local_mr_serialized.data(), local_mr_serialized.size());
   co_await qp_ptr->send(&buffer_mr);
-  std::cout << "Sent mr addr=" << server_lock_state_mr->addr()
-            << " length=" << server_lock_state_mr->length()
-            << " rkey=" << server_lock_state_mr->rkey() << " to client"
-            << std::endl;
+  BOOST_LOG_TRIVIAL(info) << "Sent mr addr=" << server_lock_state_mr->addr()
+                          << " length=" << server_lock_state_mr->length()
+                          << " rkey=" << server_lock_state_mr->rkey()
+                          << " to client";
   std::vector<uint8_t> local_mr_buffer(1024);
   auto local_mr =
       pd_ptr->reg_mr(local_mr_buffer.data(), local_mr_buffer.size());
   auto [n, imm] = co_await qp_ptr->recv(&local_mr);
-  std::printf("received %u bytes\n", n);
+  BOOST_LOG_TRIVIAL(info) << "Received " << n << " bytes"
+                          << " from client";
   delete qp_ptr;
 }
 
 rdmapp::task<void> rdma_client_func(rdmapp::qp *qp_ptr) {
   char remote_mr_serialized[rdmapp::remote_mr::kSerializedSize];
-  auto buffer_mr = pd_ptr->reg_mr(remote_mr_serialized, sizeof(remote_mr_serialized));
+  auto buffer_mr =
+      pd_ptr->reg_mr(remote_mr_serialized, sizeof(remote_mr_serialized));
   co_await qp_ptr->recv(&buffer_mr);
   auto remote_mr = rdmapp::remote_mr::deserialize(remote_mr_serialized);
-  std::cout << "Received mr addr=" << remote_mr.addr()
-            << " length=" << remote_mr.length() << " rkey=" << remote_mr.rkey()
-            << " from server" << std::endl;
+  BOOST_LOG_TRIVIAL(info) << "Received mr addr=" << remote_mr.addr()
+                          << " length=" << remote_mr.length()
+                          << " rkey=" << remote_mr.rkey() << " from server";
   uint64_t curr_state = 0;
   uint64_t prev_state = 0;
   auto local_curr_mr =
@@ -63,6 +67,11 @@ rdmapp::task<void> rdma_client_func(rdmapp::qp *qp_ptr) {
   auto local_prev_mr =
       new rdmapp::local_mr(pd_ptr->reg_mr(&prev_state, sizeof(prev_state)));
   dslr::shared_mutex mutex(remote_mr, local_prev_mr, local_curr_mr, qp_ptr);
+  BOOST_LOG_TRIVIAL(info) << "Initialized DSLR";
+  co_await mutex.lock_shared(1);
+  BOOST_LOG_TRIVIAL(info) << "Locked shared";
+  co_await mutex.unlock_shared(1, std::chrono::microseconds(0));
+  BOOST_LOG_TRIVIAL(info) << "Unlocked shared";
 }
 
 awaitable<void> send_qp(rdmapp::qp const &qp, tcp::socket &socket) {
@@ -88,9 +97,11 @@ awaitable<rdmapp::deserialized_qp> recv_qp(tcp::socket &socket) {
         use_awaitable);
   }
   auto remote_qp = rdmapp::deserialized_qp::deserialize(header);
-  std::printf("received header lid=%u qpn=%u psn=%u user_data_size=%u",
-              remote_qp.header.lid, remote_qp.header.qp_num,
-              remote_qp.header.sq_psn, remote_qp.header.user_data_size);
+  BOOST_LOG_TRIVIAL(info) << "Received qp lid=" << remote_qp.header.lid
+                          << " qp_num=" << remote_qp.header.qp_num
+                          << " sq_psn=" << remote_qp.header.sq_psn
+                          << " user_data_size="
+                          << remote_qp.header.user_data_size;
   remote_qp.user_data.resize(remote_qp.header.user_data_size);
   if (remote_qp.header.user_data_size != 0) {
     size_t user_data_read = 0;
@@ -120,11 +131,12 @@ awaitable<void> connector(std::string const &host, std::string const &port,
   tcp::resolver resolver(executor);
   auto endpoints = co_await resolver.async_resolve(query, use_awaitable);
   if (endpoints.empty()) {
-    std::printf("no endpoints\n");
+    BOOST_LOG_TRIVIAL(error) << "No endpoints found";
     co_return;
   }
   tcp::socket socket(executor);
   co_await socket.async_connect(*endpoints.begin(), use_awaitable);
+  BOOST_LOG_TRIVIAL(info) << "Connected to " << host << ":" << port;
   co_await send_qp(*qp_ptr, socket);
   auto remote_qp = co_await recv_qp(socket);
   qp_ptr->rtr(remote_qp.header.lid, remote_qp.header.qp_num,
@@ -154,7 +166,7 @@ void server_func() {
 
     io_context.run();
   } catch (std::exception &e) {
-    std::printf("Exception: %s\n", e.what());
+    BOOST_LOG_TRIVIAL(error) << "Exception: " << e.what();
   }
 }
 
@@ -170,7 +182,7 @@ void client_func(std::string const &host, std::string const &port) {
 
     io_context.run();
   } catch (std::exception &e) {
-    std::printf("Exception: %s\n", e.what());
+    BOOST_LOG_TRIVIAL(error) << "Exception: " << e.what();
   }
 }
 
@@ -203,7 +215,6 @@ int main(int argc, char *argv[]) {
   } else {
     std::cout << "Usage: " << argv[0] << " [port] for server and " << argv[0]
               << " [server_ip] [port] for client" << std::endl;
-    std::printf("Usage: %s [server|client]\n", argv[0]);
   }
   poller_thread.join();
   return 0;
